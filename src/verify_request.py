@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 import logging
+import requests
 from base64 import b64decode
 from discord_interactions import verify_key
 
@@ -45,5 +46,36 @@ def lambda_handler(event, context):
         logger.error("Unauthorized request")
         return {"statusCode": 401, "body": json.dumps({"error": "Unauthorized request"})}
 
-    # Respond with type 1 to indicate successful verification
-    return {"statusCode": 200, "body": json.dumps({"type": 1})}
+    # Parse the request body
+    body = json.loads(raw_body)
+    
+    # If this is a ping (type 1), respond immediately
+    if body.get("type") == 1:
+        return {"statusCode": 200, "body": json.dumps({"type": 1})}
+        
+    # Otherwise, call the command handler function
+    try:
+        # Get the API Gateway endpoint from environment variables or construct it
+        domain = event["requestContext"]["domainName"]
+        stage = event["requestContext"]["stage"]
+        commands_url = f"https://{domain}/{stage}/commands"
+        
+        # Forward the request to the command handler
+        response = requests.post(
+            commands_url,
+            json=body,
+            headers={
+                "Content-Type": "application/json"
+            }
+        )
+        
+        return {
+            "statusCode": response.status_code,
+            "body": response.text
+        }
+    except Exception as e:
+        logger.error(f"Error forwarding request: {str(e)}")
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": "Internal server error"})
+        }

@@ -25,19 +25,71 @@ Resources:
             Path: /
             Method: POST
       Layers:
-        - !Ref DependenciesLayer  # Attach dependencies as a separate layer
+        - !Ref DependenciesLayer
+
+  CommandHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handle_command.lambda_handler
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      Timeout: 10
+      MemorySize: 128
+      Events:
+        BotCommands:
+          Type: Api
+          Properties:
+            Path: /commands
+            Method: POST
+      Layers:
+        - !Ref DependenciesLayer
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:discord-bot-secrets-*"
 
   DependenciesLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: dependencies-layer
       Description: "Contains Python dependencies"
-      ContentUri: package/  # Forces SAM to package the dependencies
+      ContentUri: package/
       CompatibleRuntimes:
         - python3.10
       RetentionPolicy: Delete
+
+  DiscordBotAPI:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: Prod
+      CorsConfiguration:
+        AllowMethods:
+          - POST
+        AllowHeaders:
+          - Content-Type
+          - X-Signature-Ed25519
+          - X-Signature-Timestamp
+        AllowOrigins:
+          - "*"
+      AccessLogSettings:
+        DestinationArn: !GetAtt DiscordBotAPILogGroup.Arn
+        Format: '$context.requestId $context.httpMethod $context.path $context.status $context.responseLength'
+
+  DiscordBotAPILogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/http-api/${DiscordBotAPI}"
+      RetentionInDays: 7
 
 Outputs:
   VerifyRequestApi:
     Description: "API Gateway endpoint URL for Prod stage for Verify Request function"
     Value: !Sub "https://czw8rbla45.execute-api.eu-west-2.amazonaws.com/Prod/"
+  CommandHandlerApi:
+    Description: "API Gateway endpoint URL for Prod stage for Command Handler function"
+    Value: !Sub "https://${DiscordBotAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/commands"
