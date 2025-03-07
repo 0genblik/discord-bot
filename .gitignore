@@ -1,0 +1,19 @@
+# Ignore Python bytecode files
+__pycache__/
+*.py[cod]
+
+# Ignore virtual environment directories
+bot-env/
+
+# Ignore AWS SAM build artifacts
+.aws-sam/
+
+# Ignore package directory
+package/
+
+# Ignore other common files
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db

@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Discord Bot Request Verification
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 128
+
+Resources:
+  VerifyRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: verify_request.lambda_handler
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      Timeout: 10
+      MemorySize: 128
+      Events:
+        BotCalls:
+          Type: Api
+          Properties:
+            Path: /
+            Method: POST
+      Layers:
+        - !Ref DependenciesLayer  # Attach dependencies as a separate layer
+
+  DependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: dependencies-layer
+      Description: "Contains Python dependencies"
+      ContentUri: package/  # Forces SAM to package the dependencies
+      CompatibleRuntimes:
+        - python3.10
+      RetentionPolicy: Delete
+
+Outputs:
+  VerifyRequestApi:
+    Description: "API Gateway endpoint URL for Prod stage for Verify Request function"
+    Value: !Sub "https://czw8rbla45.execute-api.eu-west-2.amazonaws.com/Prod/"
