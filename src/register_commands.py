@@ -1,4 +1,3 @@
-
 import os
 import sys
 import boto3
@@ -31,25 +30,35 @@ COMMANDS = [
                 "required": True
             }
         ]
+    },
+    {
+        "name": "trivia",
+        "description": "Get a random trivia question to answer.",
+        "options": [
+            {
+                "name": "category",
+                "description": "Optional category (9-32). See https://opentdb.com/api_category.php",
+                "type": 4,  # Type 4 = integer
+                "required": False,
+                "min_value": 9,
+                "max_value": 32
+            }
+        ]
     }
 ]
 
 # API URL for registering commands
 URL = f"https://discord.com/api/v10/applications/{str(APPLICATION_ID)}/commands"
 
-
 headers = {
     "Authorization": f"Bot {BOT_TOKEN}",
     "Content-Type": "application/json"
 }
 
-for command in COMMANDS:
-    response = requests.post(
-        f"https://discord.com/api/v10/applications/{str(APPLICATION_ID)}/commands", 
-        headers=headers, 
-        json=command
-    )
-    if response.status_code in [200, 201]:  # Accept both HTTP 200 and 201 as success
-        print(f"Command '{command['name']}' registered successfully! ID: {response.json().get('id')}")
-    else:
-        print(f"Error registering command '{command['name']}': {response.text}")
+response = requests.put(URL, headers=headers, json=COMMANDS)
+if response.status_code in [200, 201]:
+    print("Successfully registered all commands!")
+    for cmd in response.json():
+        print(f"- {cmd['name']}: {cmd['id']}")
+else:
+    print(f"Error registering commands: {response.text}")
