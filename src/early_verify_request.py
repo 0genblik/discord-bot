@@ -5,14 +5,12 @@ This Lambda function serves as the primary entry point for all Discord interacti
 It implements Discord's Interactions architecture requirements:
 1. Responds to PING requests (interaction_type 1) for endpoint validation
 2. Handles command requests (interaction_type 2) by deferring to a second Lambda
-3. Processes button clicks (interaction_type 3) for interactive components
 
 Architecture Flow:
 ---------------
 1. Discord -> API Gateway -> This Lambda
 2. This Lambda validates the request signature
 3. For commands: Triggers handle_command Lambda asynchronously
-4. For buttons: Processes directly and responds
 
 Why This Design?
 --------------
@@ -180,85 +178,6 @@ def trigger_command_handler(event_body):
         logger.error(f"Error triggering command handler: {str(e)}", exc_info=True)
         return False
 
-def handle_button_interaction(event_body):
-    """
-    Process button click interactions (used for trivia answers).
-    
-    Unlike commands, button clicks are processed directly here because:
-    1. They're simple and fast (just checking correct/incorrect)
-    2. The question data is already in the message
-    3. No external API calls needed
-    
-    Technical Flow:
-    -------------
-    1. Extract custom_id from clicked button
-    2. Parse selected answer and correct answer index
-    3. Find all possible answers from original message
-    4. Compare selection with correct answer
-    5. Send ephemeral response (only visible to clicker)
-    
-    Note: Button custom_ids follow format: trivia_answer_${selected}_${correct}
-    This embeds both the user's choice and correct answer for verification.
-    """
-    try:
-        logger.info("Processing button interaction")
-        # Extract the custom_id from the button that was clicked
-        custom_id = event_body["data"]["custom_id"]
-        
-        if custom_id.startswith("trivia_answer_"):
-            # Extract the selected answer number and correct index
-            _, _, selected_num, correct_index = custom_id.split("_")
-            selected_num = int(selected_num)  # This is already 0-based from the button custom_id
-            correct_index = int(correct_index)
-            
-            # Get message that contains the question
-            message = event_body.get("message", {})
-            content = message.get("content", "")
-            logger.info(f"Processing answer for question: {content}")
-            
-            # Find all answers from the message content
-            lines = content.split("\n")
-            answers = []
-            for line in lines:
-                # Look for lines starting with numbers (1. 2. etc)
-                if line.strip() and line.strip()[0].isdigit():
-                    # Split after the number and period to get just the answer text
-                    answer = line.split(".", 1)[1].strip()
-                    answers.append(answer)
-            
-            logger.info(f"Found answers: {answers}")
-            logger.info(f"Selected num: {selected_num}, Correct index: {correct_index}")
-            
-            if selected_num < len(answers):  # Changed <= to < since we're using 0-based index
-                selected_answer = answers[selected_num]  # Use selected_num directly since it's already 0-based
-                correct_answer = answers[correct_index]
-                is_correct = selected_num == correct_index
-                
-                if is_correct:
-                    response_message = f"✅ Correct! The answer was: {correct_answer}"
-                else:
-                    response_message = f"❌ Sorry, that's incorrect. The correct answer was: {correct_answer}"
-                
-                logger.info(f"Sending response: {response_message}")
-                response_data = {
-                    "type": 4,  # MESSAGE_WITH_SOURCE
-                    "data": {
-                        "content": response_message,
-                        "flags": 64  # EPHEMERAL - only the user who clicked can see this
-                    }
-                }
-                return response_data
-    except Exception as e:
-        logger.error(f"Error handling button interaction: {e}", exc_info=True)
-    
-    return {
-        "type": 4,
-        "data": {
-            "content": "Sorry, there was an error processing your answer.",
-            "flags": 64
-        }
-    }
-
 def lambda_handler(event, context):
     """
     Main entry point for all Discord interactions.
@@ -272,7 +191,6 @@ def lambda_handler(event, context):
     ----------------
     1 = PING (Discord checking if endpoint is valid)
     2 = APPLICATION_COMMAND (slash commands)
-    3 = MESSAGE_COMPONENT (button clicks)
     
     Response Types:
     -------------
@@ -284,7 +202,6 @@ def lambda_handler(event, context):
     ----------------
     PING -> Immediate response
     COMMAND -> Defer to handle_command Lambda
-    BUTTON -> Process directly here
     """
     try:
         logger.info(f"Received event: {json.dumps(event)}")
@@ -323,14 +240,6 @@ def lambda_handler(event, context):
                 }
             
             logger.info("Successfully deferred command and triggered handler")
-            return {
-                "statusCode": 200,
-                "body": json.dumps(response_data)
-            }
-        elif interaction_type == 3:  # MESSAGE_COMPONENT (Button clicks)
-            logger.info("Handling button interaction")
-            response_data = handle_button_interaction(event_body)
-            
             return {
                 "statusCode": 200,
                 "body": json.dumps(response_data)
