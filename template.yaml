@@ -6,9 +6,12 @@ Globals:
   Function:
     Timeout: 10
     MemorySize: 128
+    Environment:
+      Variables:
+        POWERTOOLS_SERVICE_NAME: DiscordBot
 
 Resources:
-  DiscordBotFunction:
+  VerifyRequestFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
@@ -22,6 +25,38 @@ Resources:
           Properties:
             Path: /
             Method: POST
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: 
+              - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:discord_keys-*
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+              - lambda:ListFunctions
+            Resource: 
+              - !GetAtt HandleCommandFunction.Arn
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*
+      Layers:
+        - !Ref DependenciesLayer
+
+  HandleCommandFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handle_command.lambda_handler
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: 
+              - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:discord_keys-*
       Layers:
         - !Ref DependenciesLayer
 
