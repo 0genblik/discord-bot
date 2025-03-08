@@ -1,9 +1,6 @@
 import json
-import os
 import boto3
 import logging
-import requests
-from base64 import b64decode
 from discord_interactions import verify_key
 
 # Set up logging
@@ -12,23 +9,14 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS Secrets Manager client
 secrets_client = boto3.client("secretsmanager")
+secret_value = secrets_client.get_secret_value(SecretId="discord_keys")
+secrets = json.loads(secret_value["SecretString"])
+DISCORD_PUBLIC_KEY = secrets["DISCORD_PUBLIC_KEY"]
 
-def get_discord_public_key():
+def lambda_handler(event, _):
     """
-    Retrieves the Discord public key from AWS Secrets Manager.
+    Unified handler that verifies requests and responds to commands
     """
-    secret_value = secrets_client.get_secret_value(SecretId="discord_keys")
-    return json.loads(secret_value["SecretString"])["DISCORD_PUBLIC_KEY"]
-
-DISCORD_PUBLIC_KEY = get_discord_public_key()
-
-def lambda_handler(event, context):
-    """
-    Verifies incoming requests from Discord using cryptographic signatures.
-    If verification fails, returns a 401 Unauthorized response.
-    """
-    logger.info(f"Received event: {json.dumps(event)}")
-
     headers = event.get("headers", {})
     raw_body = event.get("body", "")
 
@@ -36,46 +24,48 @@ def lambda_handler(event, context):
     timestamp = headers.get("x-signature-timestamp")
 
     if not signature or not timestamp:
-        logger.error("Missing required headers")
         return {"statusCode": 400, "body": json.dumps({"error": "Missing required headers"})}
 
     # Verify the request authenticity
     is_verified = verify_key(raw_body.encode(), signature, timestamp, DISCORD_PUBLIC_KEY)
 
     if not is_verified:
-        logger.error("Unauthorized request")
         return {"statusCode": 401, "body": json.dumps({"error": "Unauthorized request"})}
 
     # Parse the request body
-    body = json.loads(raw_body)
+    event_body = json.loads(raw_body)
     
     # If this is a ping (type 1), respond immediately
-    if body.get("type") == 1:
+    if event_body.get("type") == 1:
         return {"statusCode": 200, "body": json.dumps({"type": 1})}
-        
-    # Otherwise, call the command handler function
-    try:
-        # Get the API Gateway endpoint from environment variables or construct it
-        domain = event["requestContext"]["domainName"]
-        stage = event["requestContext"]["stage"]
-        commands_url = f"https://{domain}/{stage}/commands"
-        
-        # Forward the request to the command handler
-        response = requests.post(
-            commands_url,
-            json=body,
-            headers={
-                "Content-Type": "application/json"
+
+    # Handle commands
+    command = event_body["data"]["name"]
+
+    if command == "ping":
+        response_data = {
+            "type": 4,
+            "data": {
+                "content": "Pong!"
             }
-        )
-        
-        return {
-            "statusCode": response.status_code,
-            "body": response.text
         }
-    except Exception as e:
-        logger.error(f"Error forwarding request: {str(e)}")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": "Internal server error"})
+    elif command == "weather":
+        location = next((opt["value"] for opt in event_body["data"].get("options", []) if opt["name"] == "location"), None)
+        response_data = {
+            "type": 4,
+            "data": {
+                "content": f"Weather feature coming soon! You asked about: {location}"
+            }
         }
+    else:
+        response_data = {
+            "type": 4,
+            "data": {
+                "content": f"Unknown command: {command}"
+            }
+        }
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps(response_data)
+    }

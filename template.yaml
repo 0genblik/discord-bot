@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Discord Bot Request Verification
+Description: Discord Bot with Request Verification and Command Handling
 
 Globals:
   Function:
@@ -8,7 +8,7 @@ Globals:
     MemorySize: 128
 
 Resources:
-  VerifyRequestFunction:
+  DiscordBotFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
@@ -16,8 +16,6 @@ Resources:
       Runtime: python3.10
       Architectures:
         - x86_64
-      Timeout: 10
-      MemorySize: 128
       Events:
         BotCalls:
           Type: Api
@@ -26,32 +24,6 @@ Resources:
             Method: POST
       Layers:
         - !Ref DependenciesLayer
-
-  CommandHandlerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/
-      Handler: handle_command.lambda_handler
-      Runtime: python3.10
-      Architectures:
-        - x86_64
-      Timeout: 10
-      MemorySize: 128
-      Events:
-        BotCommands:
-          Type: Api
-          Properties:
-            Path: /commands
-            Method: POST
-      Layers:
-        - !Ref DependenciesLayer
-      Policies:
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:discord-bot-secrets-*"
 
   DependenciesLayer:
     Type: AWS::Serverless::LayerVersion
@@ -87,9 +59,6 @@ Resources:
       RetentionInDays: 7
 
 Outputs:
-  VerifyRequestApi:
-    Description: "API Gateway endpoint URL for Prod stage for Verify Request function"
-    Value: !Sub "https://czw8rbla45.execute-api.eu-west-2.amazonaws.com/Prod/"
-  CommandHandlerApi:
-    Description: "API Gateway endpoint URL for Prod stage for Command Handler function"
-    Value: !Sub "https://${DiscordBotAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/commands"
+  BotApiEndpoint:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${DiscordBotAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
