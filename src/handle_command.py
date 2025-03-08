@@ -1,3 +1,34 @@
+"""
+Command Processing Lambda Function for Discord Bot
+
+This Lambda function handles the actual processing of Discord commands.
+It is triggered asynchronously by verify_request.py after the initial
+interaction acknowledgment.
+
+Architecture Flow:
+---------------
+1. verify_request.py receives Discord command
+2. verify_request.py sends "thinking..." response
+3. This Lambda is triggered asynchronously
+4. This Lambda processes command and sends final response
+
+Why a Separate Lambda?
+-------------------
+Discord requires responses within 3 seconds, but commands like weather
+and trivia need to make external API calls that might take longer.
+By splitting the bot into two Lambdas, we can:
+1. Acknowledge quickly (verify_request.py)
+2. Take our time processing (this file)
+3. Send final response when ready
+
+External Service Integration:
+-------------------------
+- OpenWeather API for weather data
+- OpenTrivia DB for trivia questions
+- AWS Secrets Manager for API keys
+- Discord API for sending responses
+"""
+
 import json
 import requests
 import boto3
@@ -20,7 +51,29 @@ APPLICATION_ID = secrets_dict["APPLICATION_ID"]
 WEATHER_API_KEY = secrets_dict["WEATHER_API_KEY"]
 
 def get_trivia_question(category=None):
-    """Get a random trivia question from OpenTDB"""
+    """
+    Fetch and format a random trivia question from OpenTrivia DB.
+    
+    Technical Flow:
+    -------------
+    1. Call OpenTrivia DB API with optional category
+    2. Decode base64-encoded response (prevents character issues)
+    3. Format question with numbered answers
+    4. Prepare response with Discord message components (buttons)
+    
+    Why Base64?
+    ----------
+    OpenTrivia DB uses base64 encoding to handle:
+    - Special characters
+    - Different alphabets
+    - HTML entities
+    
+    Discord Integration:
+    -----------------
+    The returned data is structured for Discord's:
+    - Message formatting (bold, emojis)
+    - Button components (added in lambda_handler)
+    """
     try:
         # Build the API URL with base64 encoding to avoid special character issues
         url = "https://opentdb.com/api.php?amount=1&encode=base64"
@@ -33,7 +86,7 @@ def get_trivia_question(category=None):
         data = response.json()
         logger.info(f"Received trivia API response code: {data.get('response_code')}")
         
-        if data["response_code"] != 0:
+        if (data["response_code"] != 0):
             logger.error(f"Error from trivia API, response code: {data['response_code']}")
             return None
             
@@ -83,13 +136,27 @@ def get_trivia_question(category=None):
         logger.error(f"Error fetching trivia: {e}", exc_info=True)
         return None
 
-def get_number_emoji(number):
-    """Convert a number to its emoji equivalent"""
-    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
-    return emojis[number - 1] if 1 <= number <= len(emojis) else str(number)
-
 def get_weather(location):
-    """Get weather information for a location using OpenWeather API"""
+    """
+    Get weather information using OpenWeather API.
+    
+    Technical Flow:
+    -------------
+    1. Geocoding API call to convert location name to coordinates
+    2. Weather API call to get current conditions
+    3. Format response with emojis and clear structure
+    
+    Why Two API Calls?
+    ----------------
+    OpenWeather requires coordinates for accurate data. The geocoding
+    step also validates location names and provides country information.
+    
+    Error Handling:
+    -------------
+    - Invalid locations return a user-friendly error
+    - API errors are caught and logged
+    - Network timeouts are handled gracefully
+    """
     try:
         # First get coordinates
         logger.info(f"Fetching coordinates for location: {location}")
@@ -137,7 +204,22 @@ def get_weather(location):
         return "❌ Sorry, I couldn't fetch the weather information at this time. Please try again later!"
 
 def send_followup_response(interaction_token, response_data):
-    """Sends a followup message to a deferred interaction"""
+    """
+    Send a followup message to Discord after processing is complete.
+    
+    Architecture Note:
+    ----------------
+    This is the second half of our "deferred response" pattern:
+    1. verify_request.py sends "thinking..."
+    2. This function sends the actual response
+    
+    Discord API Details:
+    ------------------
+    - Uses webhook URL format for followup messages
+    - Requires bot token for authentication
+    - Supports rich message formatting
+    - Can include components (buttons)
+    """
     url = f"https://discord.com/api/v10/webhooks/{APPLICATION_ID}/{interaction_token}"
     headers = {
         "Content-Type": "application/json",
@@ -160,7 +242,23 @@ def send_followup_response(interaction_token, response_data):
 
 def lambda_handler(event, _):
     """
-    Handles deferred Discord commands and sends responses via webhook
+    Process Discord commands and send responses.
+    
+    This is the main command processor that:
+    1. Routes commands to appropriate handlers
+    2. Formats responses for Discord
+    3. Handles errors gracefully
+    
+    Available Commands:
+    ----------------
+    /ping   - Simple bot health check
+    /weather <location> - Get current weather
+    /trivia [category] - Get random trivia question
+    
+    Architecture Note:
+    ----------------
+    This Lambda is triggered asynchronously by verify_request.py,
+    so we don't have the 3-second Discord timeout to worry about.
     """
     logger.info(f"Processing deferred command with event: {json.dumps(event)}")
     

@@ -1,6 +1,26 @@
+# Core AWS SDK - Used for interacting with AWS services
+# (Lambda, Secrets Manager, etc.)
 boto3
+
+# HTTP library - Used for making API calls to:
+# - Discord API
+# - OpenWeather API
+# - OpenTrivia DB
 requests
+
+# YAML parser - Required for AWS SAM template parsing
+# and configuration management
 pyyaml
+
+# Discord interactions library - Handles request signature
+# verification and interaction types
 discord-interactions
+
+# Cryptography library - Required by discord-interactions
+# for Ed25519 signature verification. Pinned version for
+# compatibility with Lambda runtime
 PyNaCl==1.5.0
+
+# C Foreign Function Interface - Required by PyNaCl
+# Minimum version specified for security
 cffi>=1.4.1

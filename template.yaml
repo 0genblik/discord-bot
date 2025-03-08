@@ -1,16 +1,39 @@
+# AWS SAM Template for Discord Bot
+# 
+# This template defines our entire AWS infrastructure as code.
+# It creates and configures:
+# 1. Two Lambda functions (verify_request and handle_command)
+# 2. API Gateway to receive Discord webhooks
+# 3. IAM roles and permissions
+# 4. Lambda Layer for shared dependencies
+#
+# Infrastructure Architecture:
+# -------------------------
+# Discord -> API Gateway -> verify_request Lambda -> handle_command Lambda
+#                                                -> AWS Secrets Manager
+#
+# Why Serverless?
+# -------------
+# - Pay only for what you use (no idle server costs)
+# - Automatic scaling (handles any number of Discord users)
+# - No server maintenance or updates needed
+# - Built-in logging and monitoring
+
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: Discord Bot with Request Verification and Command Handling
 
 Globals:
   Function:
-    Timeout: 10
-    MemorySize: 128
+    # Global settings applied to both Lambda functions
+    Timeout: 10  # Maximum execution time in seconds
+    MemorySize: 128  # MB of RAM allocated
     Environment:
       Variables:
         POWERTOOLS_SERVICE_NAME: DiscordBot
 
 Resources:
+  # First Lambda: Verifies and routes Discord requests
   VerifyRequestFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -20,18 +43,22 @@ Resources:
       Architectures:
         - x86_64
       Events:
+        # API Gateway configuration - this creates our webhook endpoint
         BotCalls:
           Type: Api
           Properties:
             Path: /
             Method: POST
       Policies:
+        # IAM permissions - what this function can access
         - Statement:
+          # Allow accessing bot tokens and API keys
           - Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
             Resource: 
               - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:discord_keys-*
+          # Allow triggering the command handler
           - Effect: Allow
             Action:
               - lambda:InvokeFunction
@@ -42,6 +69,7 @@ Resources:
       Layers:
         - !Ref DependenciesLayer
 
+  # Second Lambda: Processes commands and sends responses
   HandleCommandFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -52,6 +80,7 @@ Resources:
         - x86_64
       Policies:
         - Statement:
+          # Only needs access to secrets, not other Lambda functions
           - Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
@@ -60,6 +89,7 @@ Resources:
       Layers:
         - !Ref DependenciesLayer
 
+  # Shared dependencies layer
   DependenciesLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -70,10 +100,12 @@ Resources:
         - python3.10
       RetentionPolicy: Delete
 
+  # API Gateway configuration
   DiscordBotAPI:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: Prod
+      # CORS settings - important for Discord's validation
       CorsConfiguration:
         AllowMethods:
           - POST
@@ -83,16 +115,19 @@ Resources:
           - X-Signature-Timestamp
         AllowOrigins:
           - "*"
+      # Configure access logging
       AccessLogSettings:
         DestinationArn: !GetAtt DiscordBotAPILogGroup.Arn
         Format: '$context.requestId $context.httpMethod $context.path $context.status $context.responseLength'
 
+  # CloudWatch Log Group for API Gateway logs
   DiscordBotAPILogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/http-api/${DiscordBotAPI}"
       RetentionInDays: 7
 
+# Output values shown after deployment
 Outputs:
   BotApiEndpoint:
     Description: "API Gateway endpoint URL for Prod stage"
