@@ -182,6 +182,7 @@ def lambda_handler(event, _):
             response_data = {
                 "content": "Pong!"
             }
+            
         elif command == "weather":
             location = next((opt["value"] for opt in event["data"].get("options", []) 
                            if opt["name"] == "location"), None)

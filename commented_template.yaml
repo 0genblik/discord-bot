@@ -1,0 +1,137 @@
+# AWS SAM Template for Discord Bot
+#
+# This template defines our entire AWS infrastructure as code.
+# It creates and configures:
+# 1. Two Lambda functions (verify_request and handle_command)
+# 2. API Gateway to receive Discord webhooks
+# 3. IAM roles and permissions
+# 4. Lambda Layer for shared dependencies
+#
+# Infrastructure Architecture:
+# -------------------------
+# Discord -> API Gateway -> verify_request Lambda -> handle_command Lambda
+#                                                -> AWS Secrets Manager
+#
+# Why Serverless?
+# -------------
+# - Pay only for what you use (no idle server costs)
+# - Automatic scaling (handles any number of Discord users)
+# - No server maintenance or updates needed
+# - Built-in logging and monitoring
+
+AWSTemplateFormatVersion: '2010-09-09'  # Required by CloudFormation to specify the template format version.
+
+Transform: AWS::Serverless-2016-10-31  # Use the AWS Serverless Application Model (SAM) transform for serverless resources.
+
+Description: Discord Bot with Request Verification and Command Handling  # Short description of what this template provides.
+
+Globals:  # Define global settings that apply to resources in this template.
+  Function:  # The "Function" key under Globals applies to all AWS::Serverless::Function resources by default.
+    # Global settings applied to both Lambda functions
+    Timeout: 10  # Each Lambda in this template will time out after 10 seconds if it hasn't finished running.
+    MemorySize: 128  # Each Lambda function is allocated 128 MB of RAM.
+    Environment:  # Environment variables that will be injected into all Lambda functions in this template.
+      Variables:  # Key-value pairs for environment variables.
+        POWERTOOLS_SERVICE_NAME: DiscordBot  # Used by AWS Powertools to identify the service name.
+        AWS_SAM_STACK_NAME: !Ref AWS::StackName  # Inject the stack name as an environment variable (e.g., "DiscordBotStack").
+
+Resources:  # All of our AWS resources (Lambda functions, API Gateway, layers, etc.) will be defined here.
+  # First Lambda: Verifies and routes Discord requests
+  VerifyRequestFunction:  # Logical name of the first Lambda function in CloudFormation.
+    Type: AWS::Serverless::Function  # This resource is a SAM Function, which simplifies creating Lambda functions.
+    Properties:  # Configuration properties for the Lambda function.
+      CodeUri: src/  # The location of the Lambda function's source code (relative path to the template).
+      Handler: verify_request.lambda_handler  # The main Python function to execute when this Lambda is invoked.
+      Runtime: python3.10  # The version of Python used to run this function.
+      Architectures:  # Specifies the CPU architecture for the function.
+        - x86_64  # Use a 64-bit x86 architecture.
+      Events:  # Defines how the function can be triggered.
+        # API Gateway configuration - this creates our webhook endpoint
+        BotCalls:  # Logical name for the event source.
+          Type: Api  # Using HttpApi or Api event type from SAM; "Api" indicates an API Gateway resource.
+          Properties:  # Properties for the API event.
+            Path: /  # The API path ("/") that will trigger this Lambda when accessed.
+            Method: POST  # Only HTTP POST requests at this path will invoke this Lambda.
+      Policies:  # IAM permissions that this Lambda function needs.
+        # IAM permissions - what this function can access
+        - Statement:  # A list of inline IAM policy statements.
+          # Allow accessing bot tokens and API keys
+          - Effect: Allow  # Specifies that we are allowing these actions rather than denying.
+            Action:
+              - secretsmanager:GetSecretValue  # Grants the ability to retrieve secrets from Secrets Manager.
+            Resource:
+              - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:discord_keys-*  # Target secrets that start with "discord_keys-".
+          # Allow triggering the command handler
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction  # Grant permission to invoke other Lambda functions.
+              - lambda:ListFunctions  # Grant permission to list Lambda functions (sometimes needed to find ARNs).
+            Resource:
+              - !GetAtt HandleCommandFunction.Arn  # ARN of the HandleCommandFunction defined below.
+              - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*  # Wildcard for other Lambda functions in this account (included in this statement).
+      Layers:
+        - !Ref DependenciesLayer  # Attach the shared dependencies layer to this Lambda.
+
+  # Second Lambda: Processes commands and sends responses
+  HandleCommandFunction:  # Logical name of the second Lambda function.
+    Type: AWS::Serverless::Function  # Another SAM Function resource.
+    Properties:
+      CodeUri: src/  # Source code path for this Lambda.
+      Handler: handle_command.lambda_handler  # The specific function to run when invoked.
+      Runtime: python3.10  # Python 3.10 runtime environment.
+      Architectures:
+        - x86_64  # Use x86_64 architecture as well.
+      Policies:
+        - Statement:
+          # Only needs access to secrets, not other Lambda functions
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue  # Grant permission to read secrets from Secrets Manager.
+            Resource:
+              - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:discord_keys-*  # Target the "discord_keys-*" secret again.
+      Layers:
+        - !Ref DependenciesLayer  # Use the same dependencies layer as the first function.
+
+  # Shared dependencies layer
+  DependenciesLayer:  # A SAM LayerVersion resource for packaging libraries shared by the two Lambda functions.
+    Type: AWS::Serverless::LayerVersion  # Define this resource as a layer for Lambda.
+    Properties:
+      LayerName: dependencies-layer  # Give the layer a descriptive name.
+      Description: "Contains Python dependencies"  # Simple description of what’s inside this layer.
+      ContentUri: package/  # Directory containing the libraries (zipped by SAM at deployment).
+      CompatibleRuntimes:
+        - python3.10  # This layer is compatible with Python 3.10 Lambdas.
+      RetentionPolicy: Delete  # Old versions of the layer will be removed when a new version is deployed.
+
+  # API Gateway configuration
+  DiscordBotAPI:  # Logical name for our API Gateway resource.
+    Type: AWS::Serverless::HttpApi  # Using the Serverless "HttpApi" type for modern HTTP APIs.
+    Properties:
+      StageName: Prod  # The stage name ("Prod" in this case) is appended to our URL path.
+      # CORS settings - important for Discord's validation
+      CorsConfiguration:
+        AllowMethods:
+          - POST  # Only allow POST requests from external origins.
+        AllowHeaders:
+          - Content-Type  # Needed so Discord can send JSON payloads.
+          - X-Signature-Ed25519  # Header used by Discord for request signing.
+          - X-Signature-Timestamp  # Header used by Discord to prevent replay attacks.
+        AllowOrigins:
+          - "*"  # Any origin can send requests (for simplicity in a Discord context).
+      # Configure access logging
+      AccessLogSettings:
+        DestinationArn: !GetAtt DiscordBotAPILogGroup.Arn  # Use the ARN of the CloudWatch Log Group below for storing logs.
+        Format: '$context.requestId $context.httpMethod $context.path $context.status $context.responseLength'  # Log format string for API calls.
+
+  # CloudWatch Log Group for API Gateway logs
+  DiscordBotAPILogGroup:
+    Type: AWS::Logs::LogGroup  # This resource creates a CloudWatch Log Group.
+    Properties:
+      LogGroupName: !Sub "/aws/http-api/${DiscordBotAPI}"  # Name of the log group, using the API reference.
+      RetentionInDays: 7  # Logs are retained for 7 days before automatic deletion.
+
+# Output values shown after deployment
+Outputs:
+  BotApiEndpoint:  # A named output variable that will be displayed after stack creation.
+    Description: "API Gateway endpoint URL for Prod stage"  # Description of what this output represents.
+    Value: !Sub "https://${DiscordBotAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/"  # Construct the URL for the HTTP API in the Prod stage.

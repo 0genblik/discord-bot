@@ -39,7 +39,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
-      Handler: verify_request.lambda_handler
+      Handler: early_verify_request.lambda_handler
       Runtime: python3.10
       Architectures:
         - x86_64
@@ -75,7 +75,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
-      Handler: handle_command.lambda_handler
+      Handler: early_handle_command.lambda_handler
       Runtime: python3.10
       Architectures:
         - x86_64
